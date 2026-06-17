@@ -71,3 +71,32 @@ export default defineConfig([
   },
 ])
 ```
+
+
+
+---
+
+1.	Run command: npm create vite@latest tauri-react-app -- --template react-ts
+2.	Cd into project
+3.	npm install @tauri-app/cli
+4.	npx tauri init
+5.	code . -r
+6.	npm run build after changing config
+7.	npx tauri dev
+8.	npx tauri build
+
+
+
+Backend:
+py -3.12 -m venv venv
+venv\Scripts\activate
+python -m uvicorn main:app --reload
+
+
+
+Improvement:
+Confirmation button before clearing
+Store timestamp per message
+Mindmap
+
+The new context object is in context.py:1. It now carries video_path, query, and optional fields for session_id, transcript, and metadata. The agent interface in base.py:1, the router in router.py:1, and the concrete agents in transcription_agent.py:1, generation_agent.py:1, and vision_agent.py:1 now all use AgentContext instead of string-key lookups. The HTTP layer in main.py:1 constructs that typed context before routing.
