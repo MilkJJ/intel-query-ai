@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from agents.context import AgentContext
 from agents.router import build_agent_router
-from schemas import ExportRequest
+from schemas import ExportRequest, QueryResponse
 from services.export_service import generate_export_file
 from services.media_service import SUPPORTED_VIDEO_FORMATS
 
@@ -45,7 +45,7 @@ async def upload(file: UploadFile):
     return {"filename": file.filename}
 
 
-@app.post("/query")
+@app.post("/query", response_model=QueryResponse)
 async def query_video(file: UploadFile = File(...), query: str = Form(...)):
     """
     Upload a video and get its transcription.
@@ -81,18 +81,20 @@ async def query_video(file: UploadFile = File(...), query: str = Form(...)):
         
         logger.info(f"✓ Request completed successfully")
         
-        return {
-            "success": True,
-            "filename": file.filename,
-            "query": query,
-            "agent": agent_result.agent,
-            "response": agent_result.response,
-            "transcription": agent_result.transcription,
-            "language": agent_result.language,
-            "duration": agent_result.duration,
-            "objects": agent_result.objects,
-            "note": agent_result.note,
-        }
+        return QueryResponse(
+            success=True,
+            filename=file.filename,
+            query=query,
+            agent=agent_result.agent,
+            action=agent_result.action,
+            result=agent_result.response,
+            confidence=agent_result.confidence,
+            transcription=agent_result.transcription,
+            language=agent_result.language,
+            duration=agent_result.duration,
+            objects=agent_result.objects,
+            note=agent_result.note,
+        )
     
     except HTTPException:
         raise

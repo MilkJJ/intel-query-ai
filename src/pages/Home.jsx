@@ -27,7 +27,6 @@ function loadStoredMessages() {
 export default function Home() {
   const [messages, setMessages] = useState(loadStoredMessages);
   const [videoFile, setVideoFile] = useState(null);
-  const [lastResult, setLastResult] = useState(null);
 
   useEffect(() => {
     window.localStorage.setItem(CHAT_HISTORY_STORAGE_KEY, JSON.stringify(messages));
@@ -48,15 +47,14 @@ export default function Home() {
 
   const handleClearHistory = () => {
     setMessages([]);
-    setLastResult(null);
 
     if (typeof window !== "undefined") {
       window.localStorage.removeItem(CHAT_HISTORY_STORAGE_KEY);
     }
   };
 
-  const downloadExport = async (format) => {
-    if (!lastResult) {
+  const downloadExport = async (format, exportPayload) => {
+    if (!exportPayload) {
       return;
     }
 
@@ -70,12 +68,12 @@ export default function Home() {
           format,
           title: "Video AI Output",
           filename: videoFile?.name,
-          query: lastResult.query,
-          agent: lastResult.agent,
-          response: lastResult.response,
-          transcription: lastResult.transcription || "",
-          language: lastResult.language || "unknown",
-          duration: lastResult.duration || 0,
+          query: exportPayload.query,
+          agent: exportPayload.agent,
+          response: exportPayload.response,
+          transcription: exportPayload.transcription || "",
+          language: exportPayload.language || "unknown",
+          duration: exportPayload.duration || 0,
         }),
       });
 
@@ -137,13 +135,25 @@ export default function Home() {
       }
 
       const data = await res.json();
-      setLastResult(data);
+      const exportable = data.action === "generate_pdf" || data.action === "generate_ppt";
 
       setMessages((prev) => [
         ...prev,
         {
           role: "assistant",
-          content: `[${data.agent ?? "assistant"}] ${data.response ?? "No response returned."}`,
+          content: `[${data.agent ?? "assistant"}] ${data.result ?? "No response returned."}`,
+          export: exportable
+            ? {
+                canExport: true,
+                format: data.action === "generate_pdf" ? "pdf" : "ppt",
+                query: data.query,
+                agent: data.agent,
+                response: data.result,
+                transcription: data.transcription || "",
+                language: data.language || "unknown",
+                duration: data.duration || 0,
+              }
+            : null,
         },
       ]);
     } catch (error) {
@@ -162,12 +172,13 @@ export default function Home() {
       history={chatHistory}
       activeVideoName={videoFile?.name}
       onClearHistory={handleClearHistory}
-      onExportPdf={() => downloadExport("pdf")}
-      onExportPpt={() => downloadExport("ppt")}
-      canExport={Boolean(lastResult)}
     >
       <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-        <MessageList messages={messages} />
+        <MessageList
+          messages={messages}
+          onExportPdf={(exportPayload) => downloadExport("pdf", exportPayload)}
+          onExportPpt={(exportPayload) => downloadExport("ppt", exportPayload)}
+        />
         <ChatBox
           onSend={handleSend}
           onFileSelect={handleFileSelect}

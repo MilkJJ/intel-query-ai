@@ -2,9 +2,6 @@ export default function Sidebar({
   history = [],
   activeVideoName,
   onClearHistory,
-  onExportPdf,
-  onExportPpt,
-  canExport = false,
 }) {
   return (
     <div
@@ -56,56 +53,6 @@ export default function Sidebar({
         </div>
         <div style={{ fontSize: "13px", lineHeight: 1.5, wordBreak: "break-word" }}>
           {activeVideoName || "No video selected"}
-        </div>
-      </div>
-
-      <div
-        style={{
-          padding: "12px",
-          borderRadius: "10px",
-          background: "#1a1a1a",
-          border: "1px solid #2f2f2f",
-          display: "flex",
-          flexDirection: "column",
-          gap: "10px",
-        }}
-      >
-        <div style={{ fontSize: "11px", textTransform: "uppercase", color: "#8b93a7" }}>
-          Export output
-        </div>
-        <div style={{ display: "flex", gap: "8px" }}>
-          <button
-            onClick={onExportPdf}
-            disabled={!canExport}
-            style={{
-              flex: 1,
-              padding: "9px 10px",
-              borderRadius: "8px",
-              border: "1px solid #303030",
-              background: canExport ? "#202020" : "#1a1a1a",
-              color: canExport ? "#f3f4f6" : "#5f6368",
-              cursor: canExport ? "pointer" : "not-allowed",
-              fontSize: "12px",
-            }}
-          >
-            PDF
-          </button>
-          <button
-            onClick={onExportPpt}
-            disabled={!canExport}
-            style={{
-              flex: 1,
-              padding: "9px 10px",
-              borderRadius: "8px",
-              border: "1px solid #303030",
-              background: canExport ? "#202020" : "#1a1a1a",
-              color: canExport ? "#f3f4f6" : "#5f6368",
-              cursor: canExport ? "pointer" : "not-allowed",
-              fontSize: "12px",
-            }}
-          >
-            PPT
-          </button>
         </div>
       </div>
 

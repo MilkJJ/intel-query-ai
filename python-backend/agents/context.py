@@ -7,5 +7,6 @@ class AgentContext:
     video_path: str
     query: str
     session_id: str | None = None
+    action: str = ""
     transcript: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
