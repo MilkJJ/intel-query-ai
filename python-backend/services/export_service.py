@@ -1,10 +1,29 @@
 from io import BytesIO
+from typing import Any
 
 from pptx import Presentation
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
 from schemas import ExportRequest
+
+
+def _metadata_value(payload: ExportRequest, key: str, default: Any = None) -> Any:
+    if key in payload.metadata:
+        return payload.metadata.get(key, default)
+    return getattr(payload, key, default)
+
+
+def _as_string_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, tuple):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str):
+        return [value.strip()] if value.strip() else []
+    return [str(value).strip()] if str(value).strip() else []
 
 
 def write_wrapped_pdf_text(pdf: canvas.Canvas, text: str, x: int, y: int, max_width: int, line_height: int) -> int:
@@ -37,6 +56,11 @@ def generate_pdf_report(payload: ExportRequest) -> BytesIO:
     page_width, page_height = A4
     y_position = page_height - 60
 
+    transcript_summary = _metadata_value(payload, "transcript_summary", payload.transcription)
+    detected_objects = _as_string_list(_metadata_value(payload, "detected_objects", payload.detected_objects))
+    frame_text = _as_string_list(_metadata_value(payload, "frame_text", payload.frame_text))
+    vision_summary = _metadata_value(payload, "vision_summary", {}) or {}
+
     pdf.setTitle(payload.title)
     pdf.setFont("Helvetica-Bold", 18)
     pdf.drawString(50, y_position, payload.title)
@@ -54,9 +78,23 @@ def generate_pdf_report(payload: ExportRequest) -> BytesIO:
         pdf.drawString(50, y_position, line)
         y_position -= 18
 
-    sections = [("Query", payload.query), ("Agent response", payload.response)]
-    if payload.transcription:
-        sections.append(("Transcript", payload.transcription))
+    sections = [
+        ("Query", payload.query),
+        ("Transcript Summary", transcript_summary or "No transcript summary available."),
+        (
+            "Detected Objects",
+            ", ".join(detected_objects) if detected_objects else "No objects detected.",
+        ),
+        (
+            "Extracted Frame Text",
+            "\n".join(frame_text) if frame_text else "No frame text extracted.",
+        ),
+        (
+            "Vision Insights",
+            str(vision_summary) if vision_summary else "No vision insights available.",
+        ),
+        ("Agent response", payload.response),
+    ]
 
     for heading, content in sections:
         if y_position < 120:
@@ -93,6 +131,11 @@ def add_ppt_body_slide(presentation: Presentation, title: str, body: str) -> Non
 def generate_ppt_report(payload: ExportRequest) -> BytesIO:
     presentation = Presentation()
 
+    transcript_summary = _metadata_value(payload, "transcript_summary", payload.transcription)
+    detected_objects = _as_string_list(_metadata_value(payload, "detected_objects", payload.detected_objects))
+    frame_text = _as_string_list(_metadata_value(payload, "frame_text", payload.frame_text))
+    vision_summary = _metadata_value(payload, "vision_summary", {}) or {}
+
     cover_slide = presentation.slides.add_slide(presentation.slide_layouts[0])
     cover_slide.shapes.title.text = payload.title
     cover_slide.placeholders[1].text = (
@@ -103,10 +146,23 @@ def generate_ppt_report(payload: ExportRequest) -> BytesIO:
     )
 
     add_ppt_body_slide(presentation, "Query", payload.query)
-    add_ppt_body_slide(presentation, "Agent response", payload.response)
-
-    if payload.transcription:
-        add_ppt_body_slide(presentation, "Transcript", payload.transcription[:3000])
+    add_ppt_body_slide(presentation, "Key Points", transcript_summary or "No transcript summary available.")
+    add_ppt_body_slide(
+        presentation,
+        "Findings",
+        "\n".join(
+            [
+                "Objects: " + (", ".join(detected_objects) if detected_objects else "none"),
+                "Frame text: " + (" | ".join(frame_text[:5]) if frame_text else "none"),
+                "Vision insights: " + (str(vision_summary) if vision_summary else "none"),
+            ]
+        ),
+    )
+    add_ppt_body_slide(
+        presentation,
+        "Conclusion",
+        payload.response,
+    )
 
     buffer = BytesIO()
     presentation.save(buffer)

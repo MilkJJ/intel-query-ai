@@ -1,5 +1,6 @@
 export default function MessageItem({ message, onExportPdf, onExportPpt }) {
   const isUser = message.role === "user";
+  const isThinking = Boolean(message.isThinking);
   const canExport = message.export?.canExport ?? false;
 
   return (
@@ -15,13 +16,24 @@ export default function MessageItem({ message, onExportPdf, onExportPpt }) {
           flexDirection: "column",
           gap: "10px",
           padding: "10px",
-          background: isUser ? "#007bff" : "#333",
+          background: isUser ? "#007bff" : isThinking ? "#2a2f3a" : "#333",
           borderRadius: "10px",
           maxWidth: "70%",
           color: "#fff",
+          opacity: isThinking ? 0.95 : 1,
         }}
       >
-        <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{message.content}</div>
+        <div
+          style={{
+            whiteSpace: "pre-wrap",
+            lineHeight: 1.5,
+            fontStyle: isThinking ? "italic" : "normal",
+            color: isThinking ? "#cbd5e1" : "#fff",
+          }}
+        >
+          {message.content}
+          {isThinking && <span aria-hidden="true">...</span>}
+        </div>
         {!isUser && canExport && (
           <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
             <button

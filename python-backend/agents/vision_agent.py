@@ -2,13 +2,13 @@
 VisionAgent — local frame sampling and Hugging Face vision inference.
 
 Public methods:
-  - analyze_video()
-  - detect_objects()
-  - detect_graphs()
-  - extract_text()
+    - analyze_video()
+    - detect_objects()
+    - detect_graphs()
+    - extract_text()
 
-The implementation stays fully local by using Hugging Face models loaded via
-transformers pipelines. Frame sampling uses OpenCV.
+The implementation stays fully local by using Hugging Face models. Frame
+sampling uses OpenCV.
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ class VisionAgent(BaseAgent):
 
     def __init__(self):
         self._object_detector = None
-        self._captioner = None
+        self._caption_model = None
         self._zero_shot_classifier = None
         self._ocr_model = None
 
@@ -68,7 +68,8 @@ class VisionAgent(BaseAgent):
     # ── Model loading ────────────────────────────────────────────────────────
 
     def _load_object_detector(self):
-        pipeline = self._get_pipeline()
+        transformers_module = self._get_transformers_module()
+        pipeline = getattr(transformers_module, "pipeline", None) if transformers_module is not None else None
         if pipeline is None:
             raise HTTPException(status_code=500, detail="Vision dependencies are not installed. Install opencv-python, pillow, transformers, torch, and sentencepiece.")
         if self._object_detector is None:
@@ -77,16 +78,21 @@ class VisionAgent(BaseAgent):
         return self._object_detector
 
     def _load_captioner(self):
-        pipeline = self._get_pipeline()
-        if pipeline is None:
-            raise HTTPException(status_code=500, detail="Vision dependencies are not installed. Install opencv-python, pillow, transformers, torch, and sentencepiece.")
-        if self._captioner is None:
+        if self._caption_model is None:
+            transformers_module = self._get_transformers_module()
+            torch_module = self._get_torch_module()
+            if transformers_module is None or torch_module is None:
+                raise HTTPException(status_code=500, detail="Vision dependencies are not installed. Install opencv-python, pillow, transformers, torch, and sentencepiece.")
             logger.info("Loading caption model: %s", CAPTION_MODEL_NAME)
-            self._captioner = pipeline("image-to-text", model=CAPTION_MODEL_NAME)
-        return self._captioner
+            processor = transformers_module.BlipProcessor.from_pretrained(CAPTION_MODEL_NAME)
+            model = transformers_module.BlipForConditionalGeneration.from_pretrained(CAPTION_MODEL_NAME)
+            model.eval()
+            self._caption_model = (processor, model, torch_module)
+        return self._caption_model
 
     def _load_zero_shot_classifier(self):
-        pipeline = self._get_pipeline()
+        transformers_module = self._get_transformers_module()
+        pipeline = getattr(transformers_module, "pipeline", None) if transformers_module is not None else None
         if pipeline is None:
             raise HTTPException(status_code=500, detail="Vision dependencies are not installed. Install opencv-python, pillow, transformers, torch, and sentencepiece.")
         if self._zero_shot_classifier is None:
@@ -98,17 +104,27 @@ class VisionAgent(BaseAgent):
         return self._zero_shot_classifier
 
     def _load_ocr_model(self):
-        pipeline = self._get_pipeline()
-        if pipeline is None:
-            raise HTTPException(status_code=500, detail="Vision dependencies are not installed. Install opencv-python, pillow, transformers, torch, and sentencepiece.")
         if self._ocr_model is None:
+            transformers_module = self._get_transformers_module()
+            torch_module = self._get_torch_module()
+            if transformers_module is None or torch_module is None:
+                raise HTTPException(status_code=500, detail="Vision dependencies are not installed. Install opencv-python, pillow, transformers, torch, and sentencepiece.")
             logger.info("Loading OCR model: %s", OCR_MODEL_NAME)
-            self._ocr_model = pipeline("image-to-text", model=OCR_MODEL_NAME)
+            processor = transformers_module.TrOCRProcessor.from_pretrained(OCR_MODEL_NAME)
+            model = transformers_module.VisionEncoderDecoderModel.from_pretrained(OCR_MODEL_NAME)
+            model.eval()
+            self._ocr_model = (processor, model, torch_module)
         return self._ocr_model
 
-    def _get_pipeline(self):
+    def _get_transformers_module(self):
         try:
-            return import_module("transformers").pipeline
+            return import_module("transformers")
+        except ImportError:
+            return None
+
+    def _get_torch_module(self):
+        try:
+            return import_module("torch")
         except ImportError:
             return None
 
@@ -191,10 +207,15 @@ class VisionAgent(BaseAgent):
     # ── Model helpers ────────────────────────────────────────────────────────
 
     def _extract_caption(self, image: Any) -> str:
-        result = self._load_captioner()(image)
-        if isinstance(result, list) and result:
-            return str(result[0].get("generated_text", "")).strip()
-        return ""
+        processor, model, torch_module = self._load_captioner()
+        inputs = processor(images=image, return_tensors="pt")
+        inputs = {key: value.to(model.device) for key, value in inputs.items() if hasattr(value, "to")}
+
+        with torch_module.inference_mode():
+            output_ids = model.generate(**inputs, max_new_tokens=32)
+
+        caption = processor.batch_decode(output_ids, skip_special_tokens=True)
+        return caption[0].strip() if caption else ""
 
     def _detect_objects_in_image(self, image: Any) -> list[dict[str, Any]]:
         detections = self._load_object_detector()(image)
@@ -235,10 +256,15 @@ class VisionAgent(BaseAgent):
         }
 
     def _extract_text_from_image(self, image: Any) -> str:
-        result = self._load_ocr_model()(image)
-        if isinstance(result, list) and result:
-            return str(result[0].get("generated_text", "")).strip()
-        return ""
+        processor, model, torch_module = self._load_ocr_model()
+        inputs = processor(images=image, return_tensors="pt")
+        pixel_values = inputs.pixel_values.to(model.device)
+
+        with torch_module.inference_mode():
+            generated_ids = model.generate(pixel_values, max_new_tokens=64)
+
+        text = processor.batch_decode(generated_ids, skip_special_tokens=True)
+        return text[0].strip() if text else ""
 
     def _build_result(self, action: str, payload: dict[str, Any]) -> AgentResult:
         return AgentResult(

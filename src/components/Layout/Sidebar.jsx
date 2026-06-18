@@ -3,6 +3,15 @@ export default function Sidebar({
   activeVideoName,
   onClearHistory,
 }) {
+  const handleClearClick = () => {
+    const confirmed = window.confirm("Clear the chat history? This will remove all messages from the current session.");
+    if (!confirmed) {
+      return;
+    }
+
+    onClearHistory?.();
+  };
+
   return (
     <div
       style={{
@@ -18,13 +27,13 @@ export default function Sidebar({
     >
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "10px" }}>
         <div>
-          <h3 style={{ margin: "0 0 6px 0", fontSize: "18px" }}>Video AI</h3>
+          <h3 style={{ margin: "0 0 6px 0", fontSize: "18px" }}>Intel Query AI</h3>
           <p style={{ margin: 0, fontSize: "12px", color: "#9ca3af", lineHeight: 1.5 }}>
-            Uploaded video and recent chat prompts.
+            Upload a video and prompt your queries.
           </p>
         </div>
         <button
-          onClick={onClearHistory}
+          onClick={handleClearClick}
           disabled={history.length === 0}
           style={{
             padding: "8px 10px",

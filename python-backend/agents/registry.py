@@ -24,8 +24,9 @@ class AgentRegistry:
 def build_default_registry() -> AgentRegistry:
     registry = AgentRegistry()
     transcription_agent = TranscriptionAgent()
+    vision_agent = VisionAgent()
 
     registry.register(transcription_agent)
-    registry.register(VisionAgent())
-    registry.register(ReportAgent(transcription_agent))
+    registry.register(vision_agent)
+    registry.register(ReportAgent(transcription_agent, vision_agent))
     return registry

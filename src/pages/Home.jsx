@@ -28,6 +28,11 @@ export default function Home() {
   const [messages, setMessages] = useState(loadStoredMessages);
   const [videoFile, setVideoFile] = useState(null);
 
+  const createMessageId = () =>
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
   useEffect(() => {
     window.localStorage.setItem(CHAT_HISTORY_STORAGE_KEY, JSON.stringify(messages));
   }, [messages]);
@@ -72,8 +77,12 @@ export default function Home() {
           agent: exportPayload.agent,
           response: exportPayload.response,
           transcription: exportPayload.transcription || "",
+          transcript_summary: exportPayload.transcript_summary || "",
+          detected_objects: exportPayload.detected_objects || [],
+          frame_text: exportPayload.frame_text || [],
           language: exportPayload.language || "unknown",
           duration: exportPayload.duration || 0,
+          metadata: exportPayload.metadata || {},
         }),
       });
 
@@ -117,7 +126,17 @@ export default function Home() {
     }
 
     const userMessage = { role: "user", content: text };
+    const pendingMessageId = createMessageId();
     setMessages((prev) => [...prev, userMessage]);
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: pendingMessageId,
+        role: "assistant",
+        content: "Thinking",
+        isThinking: true,
+      },
+    ]);
 
     try {
       const formData = new FormData();
@@ -136,33 +155,42 @@ export default function Home() {
 
       const data = await res.json();
       const exportable = data.action === "generate_pdf" || data.action === "generate_ppt";
+      const assistantMessage = {
+        id: pendingMessageId,
+        role: "assistant",
+        content: `[${data.agent ?? "assistant"}] ${data.result ?? "No response returned."}`,
+        export: exportable
+          ? {
+              canExport: true,
+              format: data.action === "generate_pdf" ? "pdf" : "ppt",
+              query: data.query,
+              agent: data.agent,
+              response: data.result,
+              transcription: data.transcription || "",
+              transcript_summary: data.transcript_summary || "",
+              detected_objects: data.detected_objects || [],
+              frame_text: data.frame_text || [],
+              language: data.language || "unknown",
+              duration: data.duration || 0,
+              metadata: data.metadata || {},
+            }
+          : null,
+      };
 
       setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: `[${data.agent ?? "assistant"}] ${data.result ?? "No response returned."}`,
-          export: exportable
-            ? {
-                canExport: true,
-                format: data.action === "generate_pdf" ? "pdf" : "ppt",
-                query: data.query,
-                agent: data.agent,
-                response: data.result,
-                transcription: data.transcription || "",
-                language: data.language || "unknown",
-                duration: data.duration || 0,
-              }
-            : null,
-        },
+        ...prev.map((message) => (message.id === pendingMessageId ? assistantMessage : message)),
       ]);
     } catch (error) {
       setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: `Request failed: ${error.message}`,
-        },
+        ...prev.map((message) =>
+          message.id === pendingMessageId
+            ? {
+                id: pendingMessageId,
+                role: "assistant",
+                content: `Request failed: ${error.message}`,
+              }
+            : message,
+        ),
       ]);
     }
   };

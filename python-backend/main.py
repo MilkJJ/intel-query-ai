@@ -90,10 +90,14 @@ async def query_video(file: UploadFile = File(...), query: str = Form(...)):
             result=agent_result.response,
             confidence=agent_result.confidence,
             transcription=agent_result.transcription,
+            transcript_summary=agent_result.metadata.get("transcript_summary", ""),
+            detected_objects=agent_result.metadata.get("detected_objects", []),
+            frame_text=agent_result.metadata.get("frame_text", []),
             language=agent_result.language,
             duration=agent_result.duration,
             objects=agent_result.objects,
             note=agent_result.note,
+            metadata=agent_result.metadata,
         )
     
     except HTTPException:
