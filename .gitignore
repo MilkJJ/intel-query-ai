@@ -12,6 +12,31 @@ dist
 dist-ssr
 *.local
 
+# Python cache, virtualenvs, and tooling artifacts
+__pycache__/
+*.py[cod]
+*.pyd
+*.pyo
+*.pyc.*
+.python-version
+.venv/
+venv/
+env/
+ENV/
+python-backend/venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Environment files (keep templates)
+.env
+.env.*
+!.env.example
+!.env.*.example
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
