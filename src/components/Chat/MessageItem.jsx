@@ -3,6 +3,14 @@ export default function MessageItem({ message, onExportPdf, onExportPpt }) {
   const isThinking = Boolean(message.isThinking);
   const canExport = message.export?.canExport ?? false;
 
+  const handleExport = (format) => {
+    if (format === "ppt") {
+      onExportPpt?.(message.export);
+    } else {
+      onExportPdf?.(message.export);
+    }
+  };
+
   return (
     <div
       style={{
@@ -36,26 +44,59 @@ export default function MessageItem({ message, onExportPdf, onExportPpt }) {
         </div>
         {!isUser && canExport && (
           <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-            <button
-              onClick={() => {
-                if (message.export?.format === "ppt") {
-                  onExportPpt?.(message.export);
-                  return;
-                }
-                onExportPdf?.(message.export);
-              }}
-              style={{
-                padding: "8px 10px",
-                borderRadius: "8px",
-                border: "1px solid #4b5563",
-                background: "#111827",
-                color: "#f9fafb",
-                cursor: "pointer",
-                fontSize: "12px",
-              }}
-            >
-              {message.export?.format === "ppt" ? "Download PPT" : "Download PDF"}
-            </button>
+            {message.export?.format === "ppt" ? (
+              <button
+                onClick={() => handleExport("ppt")}
+                style={{
+                  padding: "8px 12px",
+                  borderRadius: "8px",
+                  border: "1px solid #4b5563",
+                  background: "#111827",
+                  color: "#f9fafb",
+                  cursor: "pointer",
+                  fontSize: "12px",
+                  fontWeight: "500",
+                  transition: "all 0.2s",
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.background = "#1f2937";
+                  e.target.style.borderColor = "#6b7280";
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.background = "#111827";
+                  e.target.style.borderColor = "#4b5563";
+                }}
+                title="Download PowerPoint presentation"
+              >
+                📑 Download PPT
+              </button>
+            ) : (
+              <button
+                onClick={() => handleExport("pdf")}
+                style={{
+                  padding: "8px 12px",
+                  borderRadius: "8px",
+                  border: "1px solid #4b5563",
+                  background: "#111827",
+                  color: "#f9fafb",
+                  cursor: "pointer",
+                  fontSize: "12px",
+                  fontWeight: "500",
+                  transition: "all 0.2s",
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.background = "#1f2937";
+                  e.target.style.borderColor = "#6b7280";
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.background = "#111827";
+                  e.target.style.borderColor = "#4b5563";
+                }}
+                title="Download PDF report"
+              >
+                📄 Download PDF
+              </button>
+            )}
           </div>
         )}
       </div>

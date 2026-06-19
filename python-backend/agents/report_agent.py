@@ -1,23 +1,43 @@
 """
-ReportAgent — generates local PDF and PowerPoint reports from analysis inputs.
+ReportAgent — generates insight-driven PDF and PowerPoint reports from video analysis.
+
+Phase 5: LLM-Enhanced Report Generation
 
 Capabilities:
-- Generate PDF summary from transcript summary, detected objects, and extracted frame text
-- Generate PPT presentation with a title slide, key points slide, findings slide, and conclusion slide
-- Return the saved file path plus structured metadata for downstream use
+- Generate PDF reports with 9 insight-driven sections (NOT transcript dumps)
+  1. Title + metadata
+  2. TL;DR (brief summary)
+  3. Executive Summary (LLM-generated)
+  4. Key Topics (LLM-identified themes)
+  5. Scene Analysis (visual timeline)
+  6. Object Detection Results (table format)
+  7. Graph Analysis (if applicable)
+  8. Key Insights (LLM reasoning)
+  9. Conclusion (LLM-generated)
 
-This agent is intentionally file-oriented so it can later be exposed via MCP
-as a download-producing tool without changing the report generation logic.
+- Generate PPT presentations with 6 insight-focused slides
+  1. Title slide
+  2. Executive Summary
+  3. Key Topics
+  4. Objects Detected
+  5. Key Insights
+  6. Conclusion
+
+- Use GenerationAgent for LLM-based insights (Phase 4 integration)
+- Return saved file path plus structured metadata
+
+Key Design: Reports focus on insights and findings, NOT raw transcript text.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import tempfile
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from xml.sax.saxutils import escape
 
 from fastapi import HTTPException
 from pptx import Presentation
@@ -41,9 +61,18 @@ DEFAULT_REPORT_TITLE = "Video AI Report"
 class ReportAgent(BaseAgent):
     name = "report"
 
-    def __init__(self, transcription_agent, vision_agent=None):
+    def __init__(self, transcription_agent, vision_agent=None, generation_agent=None):
+        """
+        Initialize ReportAgent.
+        
+        Args:
+            transcription_agent: TranscriptionAgent for audio extraction
+            vision_agent: VisionAgent for frame analysis (optional)
+            generation_agent: GenerationAgent for LLM-based insights (optional)
+        """
         self._transcription_agent = transcription_agent
         self._vision_agent = vision_agent
+        self._generation_agent = generation_agent
 
     @property
     def actions(self):
@@ -187,6 +216,62 @@ class ReportAgent(BaseAgent):
         finally:
             context.action = saved_action
 
+    def _ensure_llm_insights(self, context: AgentContext, analysis_data: dict[str, Any]) -> dict[str, Any]:
+        """Get LLM-generated insights from GenerationAgent (Phase 4)."""
+        if self._generation_agent is None:
+            logger.warning("ReportAgent: GenerationAgent not available, using heuristic insights")
+            return self._heuristic_insights(analysis_data)
+
+        # Check cache first
+        cached_insights = context.metadata.get("generated_insights")
+        if isinstance(cached_insights, dict) and cached_insights:
+            return cached_insights
+
+        try:
+            logger.info("ReportAgent: Requesting LLM insights from GenerationAgent")
+            saved_action = context.action
+            try:
+                context.action = "generate_insights"
+                result = self._generation_agent.run(context)
+                insights = result.metadata or {}
+                
+                # Ensure insights dict has required keys
+                if not isinstance(insights, dict):
+                    insights = {}
+                    
+                return {
+                    "summary": insights.get("summary", analysis_data.get("transcript_summary", "")),
+                    "key_topics": insights.get("key_topics", []),
+                    "key_insights": insights.get("key_insights", []),
+                    "conclusion": insights.get("conclusion", ""),
+                }
+            finally:
+                context.action = saved_action
+        except Exception as e:
+            logger.warning("ReportAgent: LLM insight generation failed: %s, using heuristic", e)
+            return self._heuristic_insights(analysis_data)
+
+    def _heuristic_insights(self, analysis_data: dict[str, Any]) -> dict[str, Any]:
+        """Generate heuristic insights when LLM unavailable."""
+        transcript = analysis_data.get("transcript", "")
+        objects = analysis_data.get("detected_objects", [])
+        
+        # Extract key topics from objects and transcript
+        key_topics = list(set(objects))[:5] if objects else []
+        
+        # Generate heuristic insights
+        key_insights = [
+            f"Detected {len(objects)} distinct object types" if objects else "Video contains visual content",
+            f"Transcript shows key discussion points" if transcript else "Content focuses on visual elements",
+        ]
+        
+        return {
+            "summary": analysis_data.get("transcript_summary", ""),
+            "key_topics": key_topics,
+            "key_insights": key_insights,
+            "conclusion": "Video provides comprehensive information through multimodal presentation.",
+        }
+
     def _collect_analysis_inputs(self, context: AgentContext) -> dict[str, Any]:
         transcript = self._ensure_transcript(context)
         transcript_summary = self._ensure_transcript_summary(context)
@@ -204,7 +289,8 @@ class ReportAgent(BaseAgent):
         if vision_summary is None:
             vision_summary = {}
 
-        return {
+        # Build basic analysis data
+        analysis_data = {
             "title": context.metadata.get("report_title") or DEFAULT_REPORT_TITLE,
             "video_name": Path(context.video_path).name if context.video_path else "Unknown",
             "query": context.query,
@@ -216,6 +302,12 @@ class ReportAgent(BaseAgent):
             "vision_metadata": vision_metadata,
             "created_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
         }
+
+        # Get LLM insights (Phase 5)
+        llm_insights = self._ensure_llm_insights(context, analysis_data)
+        analysis_data["llm_insights"] = llm_insights
+
+        return analysis_data
 
     def _report_directory(self, context: AgentContext) -> Path:
         root = Path(tempfile.gettempdir()) / "intel-query-ai-reports"
@@ -231,7 +323,95 @@ class ReportAgent(BaseAgent):
 
     # ── PDF generation ───────────────────────────────────────────────────────
 
+    def _safe_paragraph(self, text: str) -> str:
+        if not text:
+            return "No content available."
+        return escape(text).replace("\n", "<br/>")
+
+    def _top_items(self, values: list[str], limit: int = 5) -> list[str]:
+        cleaned = [value.strip() for value in values if isinstance(value, str) and value.strip()]
+        if not cleaned:
+            return []
+        counts = Counter(cleaned)
+        return [item for item, _ in counts.most_common(limit)]
+
+    def _key_findings(self, report_data: dict[str, Any]) -> list[str]:
+        findings: list[str] = []
+
+        summary_text = (report_data.get("transcript_summary") or "").strip()
+        if summary_text:
+            summary_excerpt = summary_text[:220] + ("..." if len(summary_text) > 220 else "")
+            findings.append(f"Transcript summary: {summary_excerpt}")
+
+        top_objects = self._top_items(report_data.get("detected_objects", []), limit=5)
+        if top_objects:
+            findings.append("Most visible objects: " + ", ".join(top_objects) + ".")
+
+        frame_text = self._top_items(report_data.get("frame_text", []), limit=3)
+        if frame_text:
+            findings.append("Important on-screen text: " + " | ".join(frame_text) + ".")
+
+        if not findings:
+            findings.append("Limited analysis signals were available, so this report is based on minimal extracted data.")
+
+        return findings
+
+    def _recommended_actions(self, report_data: dict[str, Any]) -> list[str]:
+        recommendations = [
+            "Use the transcript summary as the opening narrative when sharing this content.",
+            "Validate key object detections against the original video before final publication.",
+        ]
+
+        if report_data.get("frame_text"):
+            recommendations.append("Include the extracted frame text as supporting evidence in an appendix or speaker notes.")
+        else:
+            recommendations.append("Re-run OCR with higher frame sampling if on-screen text is important for this use case.")
+
+        if report_data.get("query"):
+            recommendations.append(f"Follow-up question to investigate: {report_data['query']}")
+
+        return recommendations
+
+    def _format_report_response(self, report_data: dict[str, Any], output_path: Path, report_format: str) -> str:
+        findings = self._key_findings(report_data)
+        format_name = report_format.upper()
+        lines = [
+            f"Your {format_name} report is ready.",
+            f"Saved to: {output_path}",
+            "",
+            "Highlights:",
+            f"- {findings[0]}",
+            f"- Objects detected: {len(report_data.get('detected_objects', []))}",
+            f"- Text snippets extracted: {len(report_data.get('frame_text', []))}",
+        ]
+        return "\n".join(lines)
+
+    def _vision_insight_lines(self, vision_summary: dict[str, Any]) -> list[str]:
+        lines: list[str] = []
+        for key, value in vision_summary.items():
+            if isinstance(value, (str, int, float, bool)):
+                lines.append(f"{key}: {value}")
+            elif isinstance(value, list):
+                lines.append(f"{key}: {len(value)} items")
+            elif isinstance(value, dict):
+                lines.append(f"{key}: {len(value)} fields")
+        return lines
+
     def _build_pdf_story(self, report_data: dict[str, Any], styles) -> list[Any]:
+        """
+        Build 9-section PDF story with LLM insights (Phase 5).
+        
+        Sections:
+        1. Title + metadata
+        2. TL;DR (brief summary)
+        3. Executive Summary (LLM)
+        4. Key Topics (LLM)
+        5. Scene Analysis (visual timeline)
+        6. Object Detection Results (table)
+        7. Graph Analysis (if applicable)
+        8. Key Insights (LLM)
+        9. Conclusion (LLM)
+        """
         story: list[Any] = []
 
         title_style = ParagraphStyle(
@@ -258,44 +438,69 @@ class ReportAgent(BaseAgent):
             textColor=colors.HexColor("#111827"),
         )
 
+        # ── Section 1: Title + Metadata ──────────────────────────────────────
         story.append(Paragraph(report_data["title"], title_style))
         story.append(Paragraph(f"Video: {report_data['video_name']}", body_style))
         story.append(Paragraph(f"Created: {report_data['created_at']}", body_style))
-        story.append(Spacer(1, 6 * mm))
+        story.append(Paragraph(f"Query: {report_data['query']}", body_style))
+        story.append(Spacer(1, 8 * mm))
 
-        sections = [
-            ("Transcript Summary", report_data["transcript_summary"]),
-            (
-                "Detected Objects",
-                ", ".join(report_data["detected_objects"]) if report_data["detected_objects"] else "No objects detected.",
-            ),
-            (
-                "Extracted Frame Text",
-                "\n".join(report_data["frame_text"]) if report_data["frame_text"] else "No frame text extracted.",
-            ),
-            (
-                "Vision Insights",
-                json.dumps(report_data["vision_summary"], indent=2, ensure_ascii=False)
-                if report_data.get("vision_summary")
-                else "No vision insights available.",
-            ),
-        ]
+        llm_insights = report_data.get("llm_insights", {})
 
-        for heading, content in sections:
-            story.append(Paragraph(heading, heading_style))
-            story.append(Paragraph(content.replace("\n", "<br/>") or "No content available.", body_style))
-            story.append(Spacer(1, 4 * mm))
+        # ── Section 2: TL;DR ─────────────────────────────────────────────────
+        story.append(Paragraph("TL;DR", heading_style))
+        tldr = llm_insights.get("summary", report_data.get("transcript_summary", ""))
+        tldr_short = tldr[:400] + ("..." if len(tldr) > 400 else "")
+        story.append(Paragraph(self._safe_paragraph(tldr_short), body_style))
+        story.append(Spacer(1, 4 * mm))
 
-        summary_rows = [
-            ["Transcript length", str(len(report_data["transcript"]))],
-            ["Objects detected", str(len(report_data["detected_objects"]))],
-            ["Text snippets", str(len(report_data["frame_text"]))],
-            ["Vision frames", str(len(report_data.get("vision_metadata", {}).get("frames", [])) if isinstance(report_data.get("vision_metadata"), dict) else 0)],
-        ]
-        summary_table = Table(summary_rows, colWidths=[70 * mm, 90 * mm])
-        summary_table.setStyle(
-            TableStyle(
-                [
+        # ── Section 3: Executive Summary ─────────────────────────────────────
+        story.append(Paragraph("Executive Summary", heading_style))
+        summary = llm_insights.get("summary", "")
+        story.append(Paragraph(self._safe_paragraph(summary), body_style))
+        story.append(Spacer(1, 4 * mm))
+
+        # ── Section 4: Key Topics ────────────────────────────────────────────
+        story.append(Paragraph("Key Topics", heading_style))
+        key_topics = llm_insights.get("key_topics", [])
+        if key_topics:
+            topics_text = "\n".join(f"• {topic}" for topic in key_topics)
+            story.append(Paragraph(self._safe_paragraph(topics_text), body_style))
+        else:
+            story.append(Paragraph("No key topics identified.", body_style))
+        story.append(Spacer(1, 4 * mm))
+
+        # ── Section 5: Scene Analysis ────────────────────────────────────────
+        story.append(Paragraph("Scene Analysis", heading_style))
+        vision_metadata = report_data.get("vision_metadata", {})
+        scenes = vision_metadata.get("scenes", [])
+        if scenes:
+            scene_text = "\n".join(
+                f"• {scene.get('timestamp', 'N/A')}s: {scene.get('caption', 'No caption')}"
+                for scene in scenes[:5]  # Limit to first 5 scenes
+            )
+            story.append(Paragraph(self._safe_paragraph(scene_text), body_style))
+        else:
+            frame_text = report_data.get("frame_text", [])
+            if frame_text:
+                frame_summary = "\n".join(f"• {text}" for text in frame_text[:5])
+                story.append(Paragraph(self._safe_paragraph(frame_summary), body_style))
+            else:
+                story.append(Paragraph("No scene data available.", body_style))
+        story.append(Spacer(1, 4 * mm))
+
+        # ── Section 6: Object Detection Results ───────────────────────────────
+        story.append(Paragraph("Object Detection Results", heading_style))
+        objects = report_data.get("detected_objects", [])
+        if objects:
+            object_rows = [["Object", "Count"]]
+            object_counts = Counter(objects)
+            for obj, count in object_counts.most_common(8):
+                object_rows.append([obj, str(count)])
+            
+            object_table = Table(object_rows, colWidths=[100 * mm, 60 * mm])
+            object_table.setStyle(
+                TableStyle([
                     ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e5e7eb")),
                     ("BACKGROUND", (0, 1), (-1, -1), colors.white),
                     ("TEXTCOLOR", (0, 0), (-1, -1), colors.HexColor("#111827")),
@@ -304,10 +509,40 @@ class ReportAgent(BaseAgent):
                     ("FONTSIZE", (0, 0), (-1, -1), 10),
                     ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
                     ("TOPPADDING", (0, 0), (-1, -1), 8),
-                ]
+                ])
             )
-        )
-        story.append(summary_table)
+            story.append(object_table)
+        else:
+            story.append(Paragraph("No objects detected.", body_style))
+        story.append(Spacer(1, 4 * mm))
+
+        # ── Section 7: Graph Analysis ────────────────────────────────────────
+        graphs_detected = vision_metadata.get("graphs_detected", False)
+        graph_descriptions = vision_metadata.get("graph_descriptions", [])
+        if graphs_detected or graph_descriptions:
+            story.append(Paragraph("Graph Analysis", heading_style))
+            if graph_descriptions:
+                graph_text = "\n".join(f"• {desc}" for desc in graph_descriptions[:3])
+                story.append(Paragraph(self._safe_paragraph(graph_text), body_style))
+            else:
+                story.append(Paragraph("Graphs detected in video. Review visual content for details.", body_style))
+            story.append(Spacer(1, 4 * mm))
+
+        # ── Section 8: Key Insights ──────────────────────────────────────────
+        story.append(Paragraph("Key Insights", heading_style))
+        key_insights = llm_insights.get("key_insights", [])
+        if key_insights:
+            insights_text = "\n".join(f"• {insight}" for insight in key_insights)
+            story.append(Paragraph(self._safe_paragraph(insights_text), body_style))
+        else:
+            story.append(Paragraph("No additional insights available.", body_style))
+        story.append(Spacer(1, 4 * mm))
+
+        # ── Section 9: Conclusion ────────────────────────────────────────────
+        story.append(Paragraph("Conclusion", heading_style))
+        conclusion = llm_insights.get("conclusion", "")
+        story.append(Paragraph(self._safe_paragraph(conclusion), body_style))
+
         return story
 
     def _write_pdf(self, report_data: dict[str, Any], output_path: Path) -> None:
@@ -352,41 +587,67 @@ class ReportAgent(BaseAgent):
             paragraph.level = 0
 
     def _write_ppt(self, report_data: dict[str, Any], output_path: Path) -> None:
+        """
+        Generate 6-slide PowerPoint with LLM insights (Phase 5).
+        
+        Slides:
+        1. Title slide
+        2. Executive Summary
+        3. Key Topics
+        4. Objects Detected
+        5. Key Insights
+        6. Conclusion
+        """
         presentation = Presentation()
         presentation.slide_width = Inches(13.333)
         presentation.slide_height = Inches(7.5)
 
+        llm_insights = report_data.get("llm_insights", {})
+
+        # Slide 1: Title slide
         self._add_title_slide(presentation, report_data)
+
+        # Slide 2: Executive Summary
+        summary = llm_insights.get("summary", report_data.get("transcript_summary", "No summary available"))
+        summary_bullets = [summary] if summary else ["No summary available"]
+        self._add_bullet_slide(presentation, "Executive Summary", summary_bullets)
+
+        # Slide 3: Key Topics
+        key_topics = llm_insights.get("key_topics", [])
+        if not key_topics:
+            # Fallback to detected objects if no key topics
+            key_topics = report_data.get("detected_objects", [])[:5]
         self._add_bullet_slide(
             presentation,
-            "Key Points",
-            [
-                report_data["transcript_summary"] if report_data["transcript_summary"] else "No transcript summary available.",
-                "Objects detected: " + (", ".join(report_data["detected_objects"]) if report_data["detected_objects"] else "none"),
-                "Frame text snippets: " + (" | ".join(report_data["frame_text"][:3]) if report_data["frame_text"] else "none"),
-            ],
+            "Key Topics",
+            key_topics if key_topics else ["Topics to be identified from video content"],
         )
 
-        findings = []
-        if report_data["detected_objects"]:
-            findings.append("Objects: " + ", ".join(report_data["detected_objects"]))
-        else:
-            findings.append("No detected objects were provided.")
-
-        if report_data["frame_text"]:
-            findings.append("Frame text: " + " | ".join(report_data["frame_text"][:5]))
-        else:
-            findings.append("No extracted frame text was provided.")
-
-        self._add_bullet_slide(presentation, "Findings", findings)
+        # Slide 4: Objects Detected
+        objects = report_data.get("detected_objects", [])
+        objects_by_count = Counter(objects)
+        top_objects = [f"{obj} ({count})" for obj, count in objects_by_count.most_common(8)]
         self._add_bullet_slide(
             presentation,
-            "Conclusion",
-            [
-                "This report consolidates transcript, object, and frame-text analysis into a shareable summary.",
-                "Use the structured metadata for follow-up automation or MCP tool integration.",
-            ],
+            "Objects Detected",
+            top_objects if top_objects else ["No objects detected"],
         )
+
+        # Slide 5: Key Insights
+        key_insights = llm_insights.get("key_insights", [])
+        self._add_bullet_slide(
+            presentation,
+            "Key Insights",
+            key_insights if key_insights else ["Key insights to be analyzed from video content"],
+        )
+
+        # Slide 6: Conclusion
+        conclusion = llm_insights.get("conclusion", "")
+        conclusion_bullets = [
+            conclusion if conclusion else "Video analysis complete.",
+            "For more details, review the full PDF report.",
+        ]
+        self._add_bullet_slide(presentation, "Conclusion", conclusion_bullets)
 
         presentation.save(str(output_path))
 
@@ -403,32 +664,39 @@ class ReportAgent(BaseAgent):
             logger.error("Failed to generate PDF report: %s", error, exc_info=True)
             raise HTTPException(status_code=500, detail=f"Failed to generate PDF report: {error}") from error
 
+        llm_insights = report_data.get("llm_insights", {})
         metadata = {
             "format": "pdf",
             "file_path": str(output_path),
             "title": report_data["title"],
             "video_name": report_data["video_name"],
             "created_at": report_data["created_at"],
-            "section_counts": {
-                "objects": len(report_data["detected_objects"]),
-                "frame_text": len(report_data["frame_text"]),
+            "sections": 9,
+            "section_names": [
+                "Title + Metadata",
+                "TL;DR",
+                "Executive Summary",
+                "Key Topics",
+                "Scene Analysis",
+                "Object Detection Results",
+                "Graph Analysis",
+                "Key Insights",
+                "Conclusion",
+            ],
+            "content": {
+                "objects_detected": len(report_data.get("detected_objects", [])),
+                "key_topics": len(llm_insights.get("key_topics", [])),
+                "key_insights": len(llm_insights.get("key_insights", [])),
+                "graphs_detected": report_data.get("vision_metadata", {}).get("graphs_detected", False),
             },
-            "sources": {
-                "transcript_summary": bool(report_data["transcript_summary"]),
-                "detected_objects": bool(report_data["detected_objects"]),
-                "frame_text": bool(report_data["frame_text"]),
-            },
+            "llm_mode": "LLM-generated" if llm_insights else "heuristic",
         }
 
-        response_payload = {
-            "message": "PDF report generated successfully.",
-            "file_path": str(output_path),
-            "metadata": metadata,
-        }
+        response_text = self._format_report_response(report_data, output_path, "pdf")
         return AgentResult(
             agent=self.name,
             action="generate_pdf",
-            response=json.dumps(response_payload, indent=2, ensure_ascii=False),
+            response=response_text,
             confidence=1.0,
             metadata=metadata,
         )
@@ -444,29 +712,35 @@ class ReportAgent(BaseAgent):
             logger.error("Failed to generate PPT report: %s", error, exc_info=True)
             raise HTTPException(status_code=500, detail=f"Failed to generate PPT report: {error}") from error
 
+        llm_insights = report_data.get("llm_insights", {})
         metadata = {
             "format": "ppt",
             "file_path": str(output_path),
             "title": report_data["title"],
             "video_name": report_data["video_name"],
             "created_at": report_data["created_at"],
-            "slides": ["title", "key points", "findings", "conclusion"],
-            "sources": {
-                "transcript_summary": bool(report_data["transcript_summary"]),
-                "detected_objects": bool(report_data["detected_objects"]),
-                "frame_text": bool(report_data["frame_text"]),
+            "slides": 6,
+            "slide_names": [
+                "Title",
+                "Executive Summary",
+                "Key Topics",
+                "Objects Detected",
+                "Key Insights",
+                "Conclusion",
+            ],
+            "content": {
+                "key_topics": len(llm_insights.get("key_topics", [])),
+                "key_insights": len(llm_insights.get("key_insights", [])),
+                "objects_detected": len(report_data.get("detected_objects", [])),
             },
+            "llm_mode": "LLM-generated" if llm_insights else "heuristic",
         }
 
-        response_payload = {
-            "message": "PowerPoint report generated successfully.",
-            "file_path": str(output_path),
-            "metadata": metadata,
-        }
+        response_text = self._format_report_response(report_data, output_path, "ppt")
         return AgentResult(
             agent=self.name,
             action="generate_ppt",
-            response=json.dumps(response_payload, indent=2, ensure_ascii=False),
+            response=response_text,
             confidence=1.0,
             metadata=metadata,
         )

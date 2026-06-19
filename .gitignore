@@ -49,3 +49,8 @@ htmlcov/
 *.njsproj
 *.sln
 *.sw?
+
+# Large model files
+*.gguf
+*.bin
+python-backend/models/

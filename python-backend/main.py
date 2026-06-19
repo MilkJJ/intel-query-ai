@@ -11,12 +11,14 @@ from agents.router import build_agent_router
 from schemas import ExportRequest, QueryResponse
 from services.export_service import generate_export_file
 from services.media_service import SUPPORTED_VIDEO_FORMATS
+from services.grpc_service_manager import get_grpc_service_manager
+from services.llama_service import get_llama_service
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI()
+app = FastAPI(title="Intel Query AI", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -26,14 +28,104 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Initialize components
 agent_router = build_agent_router()
+
+# Initialize gRPC services (Phase 2)
+grpc_manager = get_grpc_service_manager(enable_grpc=True)
+
+# Initialize LLM service (Phase 4 - now fully integrated)
+llama_service = get_llama_service(model_path=None, enable_llm=True)
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize services on startup."""
+    logger.info("=" * 80)
+    logger.info("INTEL QUERY AI - BACKEND STARTUP")
+    logger.info("=" * 80)
+    logger.info("")
+    
+    # Start gRPC services (Phase 2)
+    logger.info("[Phase 2] Starting gRPC services...")
+    try:
+        if grpc_manager.start_services():
+            status = grpc_manager.status()
+            logger.info("✓ gRPC services initialized successfully")
+            for svc, info in status.items():
+                logger.info("  - %s: %s", svc, info)
+        else:
+            logger.warning("⚠ Some gRPC services failed to start (running in fallback mode)")
+    except Exception as e:
+        logger.error("✗ gRPC startup error: %s", e)
+    
+    logger.info("")
+    
+    # Initialize LLM service (Phase 4 - fully integrated)
+    logger.info("[Phase 4] Initializing LLM service...")
+    try:
+        llm_status = llama_service.health_check()
+        if llm_status["ready"]:
+            logger.info("✓ LLM service READY (model loaded)")
+            logger.info("  Model: %s", llm_status.get("model_name", "unknown"))
+            logger.info("  Mode: %s (full reasoning enabled)", llm_status.get("mode"))
+        else:
+            logger.info("ℹ LLM service in HEURISTIC MODE (model not available)")
+            if llm_status["enabled"]:
+                logger.info("  To use LLM: download a GGUF model and place in ./models/")
+                logger.info("  Recommended: %s", llama_service.DEFAULT_MODELS.get("tinyllama"))
+            else:
+                logger.info("  LLM is disabled")
+    except Exception as e:
+        logger.error("✗ LLM service error: %s", e)
+    
+    logger.info("")
+    logger.info("=" * 80)
+    logger.info("Backend ready for requests!")
+    logger.info("=" * 80)
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup on shutdown."""
+    logger.info("Shutting down Intel Query AI backend...")
+    grpc_manager.stop_services()
 
 
 
 
 @app.get("/")
 async def health():
-    return {"status": "ok"}
+    """Health check endpoint with service status."""
+    grpc_status = grpc_manager.status() if grpc_manager else {}
+    llm_status = llama_service.health_check() if llama_service else {}
+    
+    return {
+        "status": "ok",
+        "version": "1.0.0",
+        "grpc_services": grpc_status,
+        "llm_service": llm_status,
+    }
+
+
+@app.get("/status")
+async def status():
+    """Detailed system status endpoint."""
+    llm_info = llama_service.health_check() if llama_service else {}
+    llm_model = llm_info.get("model_name", "tinyllama")
+    llm_mode = llm_info.get("mode", "unknown")
+    
+    return {
+        "backend": "online",
+        "grpc_enabled": grpc_manager.enable_grpc if grpc_manager else False,
+        "grpc_services": grpc_manager.status() if grpc_manager else {},
+        "llm_service": llm_info,
+        "models": {
+            "transcription": "faster-whisper:base (int8)",
+            "vision": "facebook/detr-resnet-50, Salesforce/blip-image-captioning-base",
+            "generation": f"{llm_model} ({llm_mode} mode, Phase 4)",
+        },
+    }
 
 
 @app.get("/favicon.ico")

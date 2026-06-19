@@ -1,4 +1,5 @@
 from io import BytesIO
+from collections import Counter
 from typing import Any
 
 from pptx import Presentation
@@ -24,6 +25,42 @@ def _as_string_list(value: Any) -> list[str]:
     if isinstance(value, str):
         return [value.strip()] if value.strip() else []
     return [str(value).strip()] if str(value).strip() else []
+
+
+def _summarize_text(text: str, max_sentences: int = 4) -> str:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return "No summary was available from the source analysis."
+
+    sentences = [sentence.strip() for sentence in cleaned.replace("\n", " ").split(".") if sentence.strip()]
+    if not sentences:
+        return cleaned[:600]
+
+    summary = ". ".join(sentences[:max_sentences]).strip()
+    if summary and not summary.endswith("."):
+        summary += "."
+    return summary
+
+
+def _top_items(items: list[str], limit: int = 6) -> list[str]:
+    cleaned = [item.strip() for item in items if item and item.strip()]
+    if not cleaned:
+        return []
+    counts = Counter(cleaned)
+    return [item for item, _ in counts.most_common(limit)]
+
+
+def _vision_insight_lines(vision_summary: Any) -> list[str]:
+    if not isinstance(vision_summary, dict):
+        return []
+
+    insights: list[str] = []
+    for key, value in vision_summary.items():
+        if isinstance(value, (str, int, float, bool)):
+            insights.append(f"{key}: {value}")
+        elif isinstance(value, list) and value:
+            insights.append(f"{key}: {len(value)} observations")
+    return insights
 
 
 def write_wrapped_pdf_text(pdf: canvas.Canvas, text: str, x: int, y: int, max_width: int, line_height: int) -> int:
@@ -61,39 +98,52 @@ def generate_pdf_report(payload: ExportRequest) -> BytesIO:
     frame_text = _as_string_list(_metadata_value(payload, "frame_text", payload.frame_text))
     vision_summary = _metadata_value(payload, "vision_summary", {}) or {}
 
+    executive_summary = _summarize_text(transcript_summary or payload.transcription)
+    top_objects = _top_items(detected_objects, limit=6)
+    top_text_snippets = _top_items(frame_text, limit=6)
+    vision_insights = _vision_insight_lines(vision_summary)
+
     pdf.setTitle(payload.title)
     pdf.setFont("Helvetica-Bold", 18)
     pdf.drawString(50, y_position, payload.title)
-    y_position -= 30
-
-    pdf.setFont("Helvetica", 11)
-    metadata_lines = [
-        f"Source video: {payload.filename or 'Unknown'}",
-        f"Agent: {payload.agent}",
-        f"Language: {payload.language}",
-        f"Duration: {payload.duration}",
-    ]
-
-    for line in metadata_lines:
-        pdf.drawString(50, y_position, line)
-        y_position -= 18
+    y_position -= 26
 
     sections = [
-        ("Query", payload.query),
-        ("Transcript Summary", transcript_summary or "No transcript summary available."),
         (
-            "Detected Objects",
-            ", ".join(detected_objects) if detected_objects else "No objects detected.",
+            "Executive Summary",
+            executive_summary,
         ),
         (
-            "Extracted Frame Text",
-            "\n".join(frame_text) if frame_text else "No frame text extracted.",
+            "Key Context Insights",
+            "\n".join(
+                [
+                    "- Visual focus: " + (", ".join(top_objects) if top_objects else "No dominant objects were detected."),
+                    "- On-screen themes: " + (" | ".join(top_text_snippets) if top_text_snippets else "No clear text themes were extracted."),
+                    "- Supporting signal count: "
+                    + f"{len(detected_objects)} object cues and {len(frame_text)} text cues were identified.",
+                ]
+            ),
         ),
         (
-            "Vision Insights",
-            str(vision_summary) if vision_summary else "No vision insights available.",
+            "Interpretation",
+            "\n".join(
+                [
+                    "The video appears to emphasize a small set of recurring ideas, supported by repeated visual and textual cues.",
+                    "These cues can be used to shape a concise narrative of the video's message and intended audience takeaway.",
+                    *( ["Supplementary analysis: " + "; ".join(vision_insights)] if vision_insights else [] ),
+                ]
+            ),
         ),
-        ("Agent response", payload.response),
+        (
+            "Recommended Next Steps",
+            "\n".join(
+                [
+                    "- Use the executive summary as the opening context in presentations or documentation.",
+                    "- Validate the most important insights against key timestamps in the original video.",
+                    "- Convert the top context insights into action items for the target audience.",
+                ]
+            ),
+        ),
     ]
 
     for heading, content in sections:

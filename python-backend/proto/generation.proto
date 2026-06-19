@@ -1,0 +1,58 @@
+syntax = "proto3";
+
+package intel_query_ai.generation;
+
+message InsightMessage {
+  string summary = 1;
+  repeated string key_topics = 2;
+  repeated string key_insights = 3;
+  string conclusion = 4;
+}
+
+message GenerateInsightsRequest {
+  string transcript = 1;
+  repeated string detected_objects = 2;
+  repeated string ocr_text = 3;
+  bool graphs_detected = 4;
+  repeated string graph_descriptions = 5;
+}
+
+message GenerateInsightsResponse {
+  InsightMessage insights = 1;
+}
+
+message GenerateSummaryRequest {
+  string transcript = 1;
+  int32 max_chars = 2;
+}
+
+message GenerateSummaryResponse {
+  string summary = 1;
+}
+
+message AnswerQueryRequest {
+  string query = 1;
+  string transcript = 2;
+  repeated string detected_objects = 3;
+  repeated string ocr_text = 4;
+  bool graphs_detected = 5;
+}
+
+message AnswerQueryResponse {
+  string answer = 1;
+}
+
+message PingRequest {
+  string message = 1;
+}
+
+message PingResponse {
+  string message = 1;
+}
+
+service GenerationService {
+  rpc GenerateInsights(GenerateInsightsRequest) returns (GenerateInsightsResponse);
+  rpc GenerateSummary(GenerateSummaryRequest) returns (GenerateSummaryResponse);
+  rpc AnswerQuery(AnswerQueryRequest) returns (AnswerQueryResponse);
+  rpc Ping(PingRequest) returns (PingResponse);
+}

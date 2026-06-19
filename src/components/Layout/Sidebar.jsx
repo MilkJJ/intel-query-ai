@@ -2,6 +2,8 @@ export default function Sidebar({
   history = [],
   activeVideoName,
   onClearHistory,
+  onSelectHistoryItem,
+  activeHistoryId,
 }) {
   const handleClearClick = () => {
     const confirmed = window.confirm("Clear the chat history? This will remove all messages from the current session.");
@@ -85,18 +87,24 @@ export default function Sidebar({
             </div>
           ) : (
             history.map((item) => (
-              <div
+              <button
                 key={item.id}
+                type="button"
+                onClick={() => onSelectHistoryItem?.(item)}
                 style={{
+                  textAlign: "left",
+                  width: "100%",
                   padding: "12px",
                   borderRadius: "10px",
-                  background: "#171717",
-                  border: "1px solid #282828",
+                  background: item.id === activeHistoryId ? "#1e293b" : "#171717",
+                  border: item.id === activeHistoryId ? "1px solid #334155" : "1px solid #282828",
+                  cursor: "pointer",
+                  color: "inherit",
                 }}
               >
                 <div style={{ fontSize: "11px", color: "#7d86a0", marginBottom: "6px" }}>{item.label}</div>
                 <div style={{ fontSize: "13px", lineHeight: 1.5, color: "#f5f5f5" }}>{item.text}</div>
-              </div>
+              </button>
             ))
           )}
         </div>

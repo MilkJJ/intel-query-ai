@@ -1,0 +1,74 @@
+syntax = "proto3";
+
+package intel_query_ai.vision;
+
+message Frame {
+  double timestamp = 1;
+  string caption = 2;
+  repeated string objects = 3;
+  string on_screen_text = 4;
+}
+
+message DetectedObject {
+  string label = 1;
+  int32 count = 2;
+  repeated int32 frames_appear_in = 3;
+}
+
+message AnalyzeFramesRequest {
+  string video_path = 1;
+  double sampling_interval = 2;
+  int32 max_frames = 3;
+}
+
+message AnalyzeFramesResponse {
+  repeated Frame frames = 1;
+  repeated DetectedObject objects = 2;
+  repeated string ocr_text = 3;
+  bool graphs_detected = 4;
+  repeated string graph_descriptions = 5;
+}
+
+message DetectObjectsRequest {
+  string video_path = 1;
+}
+
+message DetectObjectsResponse {
+  repeated DetectedObject objects = 1;
+  int32 total_frames_analyzed = 2;
+}
+
+message DetectGraphsRequest {
+  string video_path = 1;
+}
+
+message DetectGraphsResponse {
+  bool graphs_detected = 1;
+  repeated string graph_descriptions = 2;
+  repeated int32 frames_with_graphs = 3;
+}
+
+message ExtractTextRequest {
+  string video_path = 1;
+}
+
+message ExtractTextResponse {
+  repeated string text_snippets = 1;
+  int32 total_frames_analyzed = 2;
+}
+
+message PingRequest {
+  string message = 1;
+}
+
+message PingResponse {
+  string message = 1;
+}
+
+service VisionService {
+  rpc AnalyzeFrames(AnalyzeFramesRequest) returns (AnalyzeFramesResponse);
+  rpc DetectObjects(DetectObjectsRequest) returns (DetectObjectsResponse);
+  rpc DetectGraphs(DetectGraphsRequest) returns (DetectGraphsResponse);
+  rpc ExtractText(ExtractTextRequest) returns (ExtractTextResponse);
+  rpc Ping(PingRequest) returns (PingResponse);
+}

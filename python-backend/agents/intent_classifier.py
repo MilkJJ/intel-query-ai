@@ -69,12 +69,14 @@ _INTENT_RULES: list[tuple[list[str], str, str, float]] = [
         "vision", "analyze_frames", 0.90,
     ),
 
-    # ── Transcription agent ───────────────────────────────────────────────────
+    # ── Generation agent (LLM-based insights) ────────────────────────────────
     (
         ["summar", "overview", "brief", "tldr", "tl;dr", "key points",
-         "main points", "highlights", "recap"],
-        "transcription", "summarize_transcript", 0.95,
+         "main points", "highlights", "recap", "insights", "conclusion"],
+        "generation", "generate_insights", 0.95,
     ),
+
+    # ── Transcription agent ───────────────────────────────────────────────────
     (
         ["transcribe", "transcript", "caption", "subtitles", "words spoken",
          "what was said", "what did they say"],

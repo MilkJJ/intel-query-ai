@@ -5,6 +5,25 @@ import MainLayout from "../components/Layout/MainLayout";
 
 const CHAT_HISTORY_STORAGE_KEY = "chatHistory";
 
+function generateLocalMessageId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function normalizeStoredMessages(messages) {
+  if (!Array.isArray(messages)) {
+    return [];
+  }
+
+  return messages.map((message) => ({
+    ...message,
+    id: message?.id || generateLocalMessageId(),
+  }));
+}
+
 function loadStoredMessages() {
   if (typeof window === "undefined") {
     return [];
@@ -18,7 +37,7 @@ function loadStoredMessages() {
     }
 
     const parsedMessages = JSON.parse(storedMessages);
-    return Array.isArray(parsedMessages) ? parsedMessages : [];
+    return normalizeStoredMessages(parsedMessages);
   } catch {
     return [];
   }
@@ -27,6 +46,7 @@ function loadStoredMessages() {
 export default function Home() {
   const [messages, setMessages] = useState(loadStoredMessages);
   const [videoFile, setVideoFile] = useState(null);
+  const [activeHistoryMessageId, setActiveHistoryMessageId] = useState(null);
 
   const createMessageId = () =>
     typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
@@ -40,11 +60,19 @@ export default function Home() {
   const chatHistory = messages
     .filter((message) => message.role === "user")
     .map((message, index) => ({
-      id: `${index}-${message.content}`,
+      id: message.id,
       label: `Prompt ${index + 1}`,
       text: message.content,
     }))
     .reverse();
+
+  const handleHistorySelect = (historyItem) => {
+    if (!historyItem?.id) {
+      return;
+    }
+
+    setActiveHistoryMessageId(historyItem.id);
+  };
 
   const handleFileSelect = (file) => {
     setVideoFile(file);
@@ -52,6 +80,7 @@ export default function Home() {
 
   const handleClearHistory = () => {
     setMessages([]);
+    setActiveHistoryMessageId(null);
 
     if (typeof window !== "undefined") {
       window.localStorage.removeItem(CHAT_HISTORY_STORAGE_KEY);
@@ -71,7 +100,7 @@ export default function Home() {
         },
         body: JSON.stringify({
           format,
-          title: "Video AI Output",
+          title: "Video Analysis and Insights Report",
           filename: videoFile?.name,
           query: exportPayload.query,
           agent: exportPayload.agent,
@@ -82,6 +111,8 @@ export default function Home() {
           frame_text: exportPayload.frame_text || [],
           language: exportPayload.language || "unknown",
           duration: exportPayload.duration || 0,
+          // Phase 5: Include LLM insights and enhanced metadata
+          llm_insights: exportPayload.llm_insights || {},
           metadata: exportPayload.metadata || {},
         }),
       });
@@ -119,21 +150,23 @@ export default function Home() {
         ...prev,
         {
           role: "assistant",
-          content: "Please upload a video first, then send a query like 'Transcribe the video'.",
+          content:
+            "📹 Please upload a video first to get started. Click the attachment button (📎) to select an MP4, MOV, AVI, MKV, FLV, or WMV file.\n\nOnce uploaded, try asking:\n• 'Transcribe the video' - Get the full transcript\n• 'What objects are shown?' - Detect objects in the video\n• 'Summarize this video' - Get a brief summary\n• 'Generate a PDF report' - Create an insight-driven report",
         },
       ]);
       return;
     }
 
-    const userMessage = { role: "user", content: text };
+    const userMessage = { id: createMessageId(), role: "user", content: text };
     const pendingMessageId = createMessageId();
+    setActiveHistoryMessageId(userMessage.id);
     setMessages((prev) => [...prev, userMessage]);
     setMessages((prev) => [
       ...prev,
       {
         id: pendingMessageId,
         role: "assistant",
-        content: "Thinking",
+        content: "Analyzing your video",
         isThinking: true,
       },
     ]);
@@ -172,6 +205,8 @@ export default function Home() {
               frame_text: data.frame_text || [],
               language: data.language || "unknown",
               duration: data.duration || 0,
+              // Phase 5: Enhanced metadata with LLM insights
+              llm_insights: data.llm_insights || {},
               metadata: data.metadata || {},
             }
           : null,
@@ -187,7 +222,7 @@ export default function Home() {
             ? {
                 id: pendingMessageId,
                 role: "assistant",
-                content: `Request failed: ${error.message}`,
+                content: `⚠️ Request failed: ${error.message}\n\nMake sure the backend is running on http://localhost:8000`,
               }
             : message,
         ),
@@ -200,12 +235,15 @@ export default function Home() {
       history={chatHistory}
       activeVideoName={videoFile?.name}
       onClearHistory={handleClearHistory}
+      onSelectHistoryItem={handleHistorySelect}
+      activeHistoryId={activeHistoryMessageId}
     >
       <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
         <MessageList
           messages={messages}
           onExportPdf={(exportPayload) => downloadExport("pdf", exportPayload)}
           onExportPpt={(exportPayload) => downloadExport("ppt", exportPayload)}
+          scrollToMessageId={activeHistoryMessageId}
         />
         <ChatBox
           onSend={handleSend}

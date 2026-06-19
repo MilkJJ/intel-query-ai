@@ -1,13 +1,34 @@
+# Core dependencies
 fastapi
 uvicorn
 python-multipart
 python-dotenv
+
+# ML/NLP models
 faster-whisper
-reportlab
-python-pptx
-opencv-python
-pillow
 transformers
 torch
 sentencepiece
 timm
+
+# Media processing
+opencv-python
+pillow
+
+# Report generation
+reportlab
+python-pptx
+
+# gRPC services (Phase 2)
+grpcio>=1.60.0
+grpcio-tools>=1.60.0
+protobuf>=4.0.0
+
+# Local LLM (Phase 4 - Llama.cpp)
+llama-cpp-python>=0.2.0
+
+# Optional: Advanced models (Phase 5)
+ultralytics  # YOLOv8 for advanced object detection
+pytesseract  # OCR text extraction
+openvino>=2023.1.0  # OpenVINO inference engine
+openvino-dev>=2023.1.0  # OpenVINO development tools

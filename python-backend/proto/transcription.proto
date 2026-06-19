@@ -1,0 +1,46 @@
+syntax = "proto3";
+
+package intel_query_ai.transcription;
+
+message TranscribeRequest {
+  string video_path = 1;
+  string language_hint = 2;
+}
+
+message TranscriptSegment {
+  double start = 1;
+  double end = 2;
+  string text = 3;
+}
+
+message TranscribeResponse {
+  string transcription = 1;
+  repeated double timestamps = 2;
+  string language = 3;
+  float duration = 4;
+  repeated TranscriptSegment segments = 5;
+}
+
+message SummarizeRequest {
+  string transcript = 1;
+  int32 max_sentences = 2;
+}
+
+message SummarizeResponse {
+  string summary = 1;
+  repeated string key_sentences = 2;
+}
+
+message PingRequest {
+  string message = 1;
+}
+
+message PingResponse {
+  string message = 1;
+}
+
+service TranscriptionService {
+  rpc Transcribe(TranscribeRequest) returns (TranscribeResponse);
+  rpc Summarize(SummarizeRequest) returns (SummarizeResponse);
+  rpc Ping(PingRequest) returns (PingResponse);
+}
